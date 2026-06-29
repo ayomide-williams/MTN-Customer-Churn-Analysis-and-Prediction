@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
+import joblib
 import os
 from pathlib import Path
 
@@ -20,53 +21,57 @@ st.set_page_config(
 def load_model_and_encoders():
     """Load the trained model and encoders"""
     try:
-        # Try to load tuned models first (skip metadata files)
-        model_files = [
-            'models/Gradient_Boosting_tuned.pkl',
-            'models/Random_Forest_tuned.pkl',
-            'models/XGBoost_tuned.pkl',
-            'models/Gradient_Boosting_base.pkl',
-            'models/Random_Forest_base.pkl',
-            'models/XGBoost_base.pkl'
-        ]
-        
+        base_dir = Path(__file__).resolve().parent
+        models_dir = base_dir / 'models'
+        encoders_path = models_dir / 'encoders.pkl'
+
+        if not models_dir.exists():
+            raise FileNotFoundError(f"Models directory not found: {models_dir}")
+
+        # Priority: tuned models first, then base models
+        model_files = sorted(models_dir.glob('*_tuned.pkl')) + sorted(models_dir.glob('*_base.pkl'))
         model = None
         model_path = None
-        
-        for path in model_files:
-            if os.path.exists(path) and '_metadata' not in path:
-                try:
-                    with open(path, 'rb') as f:
+
+        for candidate_path in model_files:
+            if '_metadata' in candidate_path.name:
+                continue
+            try:
+                with open(candidate_path, 'rb') as f:
+                    try:
                         loaded_obj = pickle.load(f)
-                    
-                    # Check if it's a valid model (has predict method)
-                    if hasattr(loaded_obj, 'predict'):
-                        model = loaded_obj
-                        print(f"✅ Loaded model directly: {path}")
-                    elif isinstance(loaded_obj, dict) and 'model' in loaded_obj:
-                        model = loaded_obj['model']
-                        print(f"✅ Loaded model from dict structure: {path}")
-                    else:
-                        print(f"⚠️ Skipping {path}: Not a valid model")
-                        continue
-                    
-                    model_path = path
-                    break
-                except Exception as e:
-                    print(f"⚠️ Failed to load {path}: {e}")
+                    except Exception:
+                        loaded_obj = joblib.load(candidate_path)
+
+                if hasattr(loaded_obj, 'predict'):
+                    model = loaded_obj
+                    print(f"Loaded model directly: {candidate_path}")
+                elif isinstance(loaded_obj, dict) and 'model' in loaded_obj and hasattr(loaded_obj['model'], 'predict'):
+                    model = loaded_obj['model']
+                    print(f"Loaded model from dict structure: {candidate_path}")
+                else:
+                    print(f"Skipping {candidate_path}: Not a valid model object")
                     continue
-        
+
+                model_path = str(candidate_path)
+                break
+            except Exception as e:
+                print(f"Failed to load {candidate_path}: {e}")
+                continue
+
         if model is None:
-            raise FileNotFoundError("No trained model found. Please run main.py first.")
-        
-        # Load encoders
-        encoders_path = 'models/encoders.pkl'
-        if not os.path.exists(encoders_path):
-            raise FileNotFoundError("Encoders not found. Please run main.py first.")
-            
+            available = [p.name for p in model_files if '_metadata' not in p.name]
+            raise FileNotFoundError(
+                "No trained model found. Please run main.py first. "
+                f"Available files: {available}"
+            )
+
+        if not encoders_path.exists():
+            raise FileNotFoundError(f"Encoders not found: {encoders_path}. Please run main.py first.")
+
         with open(encoders_path, 'rb') as f:
             encoders_dict = pickle.load(f)
-        
+
         return model, encoders_dict, model_path
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
