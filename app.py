@@ -6,7 +6,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import joblib
+try:
+    import joblib
+except ImportError:
+    joblib = None
 import os
 from pathlib import Path
 
@@ -40,7 +43,12 @@ def load_model_and_encoders():
                 with open(candidate_path, 'rb') as f:
                     try:
                         loaded_obj = pickle.load(f)
-                    except Exception:
+                    except Exception as pickle_exc:
+                        if joblib is None:
+                            raise ImportError(
+                                "joblib is required to load this model file but is not installed. "
+                                "Install it via requirements.txt and redeploy."
+                            ) from pickle_exc
                         loaded_obj = joblib.load(candidate_path)
 
                 if hasattr(loaded_obj, 'predict'):
